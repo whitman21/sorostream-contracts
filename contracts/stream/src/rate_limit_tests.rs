@@ -63,6 +63,7 @@ fn rl_params(nonce: u64) -> CreateStreamParams {
         cliff_seconds: 0,
         nonce,
         renew_count: None,
+        recurrence: None,
         lock_until: 0,
         allow_recipient_termination: false,
         non_transferable: false,

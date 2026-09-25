@@ -144,6 +144,12 @@ pub trait SoroStreamInterface {
     /// Only the sender may call this. No-op if the stream is not in EscrowHold state.
     fn activate_stream(env: Env, stream_id: u64, sender: Address) -> Result<(), StreamError>;
 
+    /// Approves escrow release for a stream placed in `EscrowHold`.
+    ///
+    /// Once both sender and recipient have called this method, the stream moves
+    /// from `EscrowHold` to `Active` and vesting begins from the approval time.
+    fn approve_release(env: Env, stream_id: u64, caller: Address) -> Result<(), StreamError>;
+
     fn withdraw(env: Env, stream_id: u64, recipient: Address) -> Result<(), StreamError>;
     fn cancel_stream(env: Env, stream_id: u64, sender: Address) -> Result<(), StreamError>;
     fn stop_stream(env: Env, stream_id: u64, caller: Address) -> Result<(), StreamError>;

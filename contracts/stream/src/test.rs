@@ -302,6 +302,52 @@ fn test_top_up_extends_duration() {
 }
 
 #[test]
+fn test_recurrence_alias_sets_renew_count() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let contract_id = env.register(SoroStreamContract, ());
+    let token_admin = Address::generate(&env);
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    StellarAssetClient::new(&env, &token_id).mint(&sender, &500_000);
+
+    let c = SoroStreamContractClient::new(&env, &contract_id);
+    c.set_min_duration(&sender, &0u64);
+    env.ledger().set_timestamp(0);
+
+    let stream_id = c.create_stream(
+        &sender,
+        &recipient,
+        &token_id,
+        &100_000,
+        &1000,
+        &0,
+        &crate::types::CreateStreamParams {
+            cliff_seconds: 0,
+            nonce: 0,
+            renew_count: None,
+            recurrence: Some(2),
+            lock_until: 0,
+            allow_recipient_termination: false,
+            non_transferable: false,
+            holdback_amount: 0,
+            withdrawal_steps: None,
+            min_withdrawal_amount: None,
+            requires_recipient_approval: false,
+        },
+    );
+
+    let stream = c.get_stream(&stream_id);
+    assert_eq!(stream.options.renew_count, Some(2));
+    assert_eq!(stream.options.renewals_used, 0);
+}
+
+#[test]
 fn test_auto_renew_restarts_on_completion() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
@@ -1322,6 +1368,59 @@ fn error_not_sender_on_partial_cancel() {
 
     let result = c.try_partial_cancel_stream(&stream_id, &other, &10_000);
     assert_eq!(result, Err(Ok(StreamError::NotAuthorized)));
+}
+
+#[test]
+fn error_third_party_cannot_mutate_unowned_stream() {
+    let t = setup();
+    let c = client(&t);
+    let stream_id = c.create_stream(
+        &t.sender,
+        &t.recipient,
+        &t.token_id,
+        &100_000,
+        &1000,
+        &0,
+        &0u64,
+        &false,
+        &0u64,
+        &false,
+        &0i128,
+        &None::<u32>,
+        &None::<i128>,
+        &None::<u32>,
+    );
+    let other = Address::generate(&t.env);
+    let target = Address::generate(&t.env);
+    let delegate = Address::generate(&t.env);
+
+    let results = [
+        c.try_stop_stream(&stream_id, &other),
+        c.try_pause_stream(&stream_id, &other),
+        c.try_resume_stream(&stream_id, &other),
+        c.try_lock_stream(&stream_id, &other),
+        c.try_set_delegate(&other, &stream_id, &delegate),
+        c.try_revoke_delegate(&other, &stream_id),
+        c.try_update_stream_rate(&stream_id, &other, &100),
+        c.try_release_holdback(&stream_id, &other),
+        c.try_claw_back_holdback(&stream_id, &other),
+        c.try_set_redirect(&stream_id, &stream_id, &other),
+        c.try_clear_redirect(&stream_id, &other),
+        c.try_split_stream(&stream_id, &other, &soroban_sdk::vec![&t.env, target], &soroban_sdk::vec![&t.env, 100u128], &0u64),
+    ];
+
+    for result in results {
+        assert!(
+            matches!(
+                result,
+                Err(Ok(StreamError::NotAuthorized))
+                    | Err(Ok(StreamError::NotSender))
+                    | Err(Ok(StreamError::NotRecipient))
+            ),
+            "unauthorized third-party mutation should be rejected: {:?}",
+            result
+        );
+    }
 }
 
 #[test]
@@ -5301,6 +5400,42 @@ fn test_approve_stream_only_callable_by_recipient() {
     let other = Address::generate(&t.env);
     let result = c.try_approve_stream(&stream_id, &other);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_escrow_hold_requires_both_parties_to_approve_release() {
+    let t = setup();
+    let c = client(&t);
+    t.env.ledger().set_timestamp(0);
+
+    let stream_id = c.create_stream_with_curve(
+        &t.sender,
+        &t.recipient,
+        &t.token_id,
+        &100_000i128,
+        &1000u64,
+        &0u64,
+        &0u64,
+        &false,
+        &None::<u32>,
+        &0u64,
+        &false,
+        &crate::types::VestingCurve::Linear,
+        &None::<Address>,
+        &None::<soroban_sdk::Symbol>,
+        &true,
+    );
+
+    let before = c.get_stream(&stream_id);
+    assert_eq!(before.status, StreamStatus::EscrowHold);
+
+    c.approve_release(&stream_id, &t.sender);
+    let after_sender = c.get_stream(&stream_id);
+    assert_eq!(after_sender.status, StreamStatus::EscrowHold);
+
+    c.approve_release(&stream_id, &t.recipient);
+    let active = c.get_stream(&stream_id);
+    assert_eq!(active.status, StreamStatus::Active);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

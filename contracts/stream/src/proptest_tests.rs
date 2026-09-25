@@ -46,6 +46,7 @@ fn make_params(cliff_seconds: u64, nonce: u64, lock_until: u64, allow_recipient_
         cliff_seconds,
         nonce,
         renew_count: None,
+        recurrence: None,
         lock_until,
         allow_recipient_termination,
         non_transferable: false,

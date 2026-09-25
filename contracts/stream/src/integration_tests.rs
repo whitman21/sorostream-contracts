@@ -60,6 +60,7 @@ fn params(cliff_seconds: u64, nonce: u64, auto_renew_count: Option<u32>, lock_un
         cliff_seconds,
         nonce,
         renew_count: auto_renew_count,
+        recurrence: auto_renew_count,
         lock_until,
         allow_recipient_termination: allow_term,
         non_transferable: false,

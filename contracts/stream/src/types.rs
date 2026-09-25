@@ -200,6 +200,18 @@ pub struct StreamOptions {
     /// pending window.
     pub approval_timestamp: u64,
 
+    /// Whether the sender has approved release from escrow hold.
+    ///
+    /// When a stream is created with `escrow_hold = true`, both parties must
+    /// mark approval before the stream transitions to `Active` and begins
+    /// vesting.  The sender may still call `activate_stream` as a convenience,
+    /// which effectively marks sender approval and completes activation if the
+    /// recipient has already approved.
+    pub escrow_sender_approved: bool,
+
+    /// Whether the recipient has approved release from escrow hold.
+    pub escrow_recipient_approved: bool,
+
     // ── Sender-initiated irrevocable lock ─────────────────────────────────────
 
     /// Whether the sender has voluntarily renounced their right to cancel.
@@ -287,7 +299,13 @@ pub struct CreateStreamOptions {
     /// Optional limit on the number of auto-renewals. When set, the stream will
     /// automatically renew up to this many times. `None` means unlimited
     /// auto-renewals (default behaviour when `auto_renew` is true).
+    ///
+    /// Legacy alias retained for compatibility. When both `renew_count` and
+    /// `recurrence` are supplied, `recurrence` takes precedence.
     pub renew_count: Option<u32>,
+    /// Optional recurrence cap for payroll-style streams. Alias for
+    /// `renew_count` and preferred for new code.
+    pub recurrence: Option<u32>,
     /// Whether the recipient is allowed to terminate the stream early.
     pub allow_recipient_termination: bool,
     /// Whether the stream's recipient rights are locked to the original recipient.
@@ -306,6 +324,12 @@ pub struct CreateStreamOptions {
     pub requires_recipient_approval: bool,
     /// Optional human-readable payment reference (UTF-8, at most 256 bytes).
     pub comment: Option<String>,
+}
+
+impl CreateStreamOptions {
+    pub fn effective_renew_count(&self) -> Option<u32> {
+        self.recurrence.or(self.renew_count)
+    }
 }
 
 
@@ -535,11 +559,26 @@ pub struct StreamQueryFilter {
 #[derive(Clone, Debug)]
 pub struct StreamCreateOptions {
     /// Optional limit on the number of auto-renewals (see `Stream::renew_count`).
+    ///
+    /// Kept for backward compatibility. `recurrence` takes precedence when both
+    /// fields are set, which allows payroll-style stream creation to use the
+    /// clearer recurrence terminology without breaking legacy callers.
     pub renew_count: Option<u32>,
+    /// Optional recurrence cap for payroll-style streams.
+    ///
+    /// `None` means unlimited renewals; `Some(n)` allows the stream to renew up
+    /// to `n` times before completing.
+    pub recurrence: Option<u32>,
     /// Whether the recipient is allowed to terminate the stream early.
     pub allow_recipient_termination: bool,
     /// Whether the stream's recipient rights are locked to the original recipient.
     pub non_transferable: bool,
+}
+
+impl StreamCreateOptions {
+    pub fn effective_renew_count(&self) -> Option<u32> {
+        self.recurrence.or(self.renew_count)
+    }
 }
 
 /// All creation-time parameters for `create_stream`, bundled into one struct
@@ -552,7 +591,12 @@ pub struct CreateStreamParams {
     /// Sender-supplied unique nonce used to derive the stream ID deterministically.
     pub nonce: u64,
     /// Optional limit on the number of auto-renewals.
+    ///
+    /// Legacy alias retained for compatibility. Prefer `recurrence` for new
+    /// payroll-style stream creation; when both are set, `recurrence` wins.
     pub renew_count: Option<u32>,
+    /// Optional recurrence cap for payroll-style streams.
+    pub recurrence: Option<u32>,
     /// Ledger timestamp before which withdrawals are not permitted (0 = no lock).
     pub lock_until: u64,
     /// Whether the recipient is allowed to terminate the stream early.
@@ -567,4 +611,10 @@ pub struct CreateStreamParams {
     pub min_withdrawal_amount: Option<i128>,
     /// Whether this stream requires explicit recipient approval before tokens accrue.
     pub requires_recipient_approval: bool,
+}
+
+impl CreateStreamParams {
+    pub fn effective_renew_count(&self) -> Option<u32> {
+        self.recurrence.or(self.renew_count)
+    }
 }

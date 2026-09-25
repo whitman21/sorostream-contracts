@@ -685,6 +685,7 @@ impl SoroStreamContract {
         let lock_until = params.lock_until;
         let comment: Option<String> = None;
         let options = &params;
+        let renewal_cap = options.effective_renew_count();
         let tag: Option<String> = None;
         let on_complete_contract: Option<Address> = None;
         let on_complete_function: Option<Symbol> = None;
@@ -900,7 +901,7 @@ impl SoroStreamContract {
             },
             auto_renew,
             options: StreamOptions {
-                renew_count: options.renew_count,
+                renew_count: renewal_cap,
                 renewals_used: 0,
                 allow_recipient_termination: options.allow_recipient_termination,
                 last_pause_time: 0,
@@ -924,6 +925,8 @@ impl SoroStreamContract {
                 non_transferable: options.non_transferable,
                 requires_recipient_approval: options.requires_recipient_approval,
                 approval_timestamp: 0,
+                escrow_sender_approved: false,
+                escrow_recipient_approved: false,
                 sender_locked: false,
                 redirect_to_stream_id: None,
                 is_dual_stream: false,
@@ -1006,6 +1009,7 @@ impl SoroStreamContract {
                 cliff_seconds: 0,
                 lock_until,
                 renew_count,
+                recurrence: renew_count,
                 allow_recipient_termination,
                 non_transferable,
                 holdback_amount: 0,
@@ -1211,6 +1215,8 @@ impl SoroStreamContract {
                 non_transferable: false,
                 requires_recipient_approval: false,
                 approval_timestamp: 0,
+                escrow_sender_approved: false,
+                escrow_recipient_approved: false,
                 sender_locked: false,
                 redirect_to_stream_id: None,
                 on_complete_contract: None,
@@ -1465,6 +1471,8 @@ impl SoroStreamContract {
                 non_transferable: false,
                 requires_recipient_approval: false,
                 approval_timestamp: 0,
+                escrow_sender_approved: false,
+                escrow_recipient_approved: false,
                 sender_locked: false,
                 redirect_to_stream_id: None,
                 is_dual_stream: false,
@@ -1660,6 +1668,8 @@ impl SoroStreamContract {
                 non_transferable: false,
                 requires_recipient_approval: false,
                 approval_timestamp: 0,
+                escrow_sender_approved: false,
+                escrow_recipient_approved: false,
                 sender_locked: false,
                 redirect_to_stream_id: None,
                 is_dual_stream: false,
@@ -1847,6 +1857,8 @@ impl SoroStreamContract {
                 non_transferable: false,
                 requires_recipient_approval: false,
                 approval_timestamp: 0,
+                escrow_sender_approved: false,
+                escrow_recipient_approved: false,
                 sender_locked: false,
                 redirect_to_stream_id: None,
                 is_dual_stream: false,
@@ -2457,19 +2469,83 @@ impl SoroStreamContract {
             return Err(StreamError::StreamNotActive);
         }
 
-        let now = env.ledger().timestamp();
+        stream.options.escrow_sender_approved = true;
+        if stream.options.escrow_recipient_approved {
+            let now = env.ledger().timestamp();
+            let pending_duration = now.saturating_sub(stream.start_time);
+            stream.start_time = now;
+            stream.cliff_time = stream.cliff_time.saturating_add(pending_duration);
+            stream.end_time = stream.end_time.saturating_add(pending_duration);
+            stream.lock_until = if stream.lock_until > 0 {
+                stream.lock_until.saturating_add(pending_duration)
+            } else {
+                0
+            };
+            stream.last_withdraw_time = now;
+            stream.status = StreamStatus::Active;
+            save_stream(&env, &stream);
+            increment_active_stream_count(&env);
+            increment_token_stream_count(&env, &stream.token);
+            events::stream_activated(&env, stream_id, &sender, now);
+            return Ok(());
+        }
 
-        // Transition to Active state
-        stream.status = StreamStatus::Active;
         save_stream(&env, &stream);
+        Ok(())
+    }
 
-        // Update counts now that stream is active
-        increment_active_stream_count(&env);
-        increment_token_stream_count(&env, &stream.token);
+    /// Approves escrow release for a stream placed in `EscrowHold`.
+    ///
+    /// Once both the sender and the recipient have called this function, the
+    /// stream transitions from `EscrowHold` to `Active` and vesting begins from
+    /// the later approval timestamp.
+    pub fn approve_release(env: Env, stream_id: u64, caller: Address) -> Result<(), StreamError> {
+        if is_paused_or_auto_unpause(&env) {
+            return Err(StreamError::ContractPaused);
+        }
 
-        // Emit activation event
-        events::stream_activated(&env, stream_id, &sender, now);
+        caller.require_auth();
 
+        let mut stream = load_stream(&env, stream_id).ok_or(StreamError::StreamNotFound)?;
+
+        if stream.status != StreamStatus::EscrowHold {
+            return Err(StreamError::StreamNotActive);
+        }
+
+        let is_sender = stream.sender == caller;
+        let is_recipient = stream.recipient == caller;
+        if !is_sender && !is_recipient {
+            return Err(StreamError::NotAuthorized);
+        }
+
+        if is_sender {
+            stream.options.escrow_sender_approved = true;
+        }
+        if is_recipient {
+            stream.options.escrow_recipient_approved = true;
+        }
+
+        if stream.options.escrow_sender_approved && stream.options.escrow_recipient_approved {
+            let now = env.ledger().timestamp();
+            let pending_duration = now.saturating_sub(stream.start_time);
+            stream.start_time = now;
+            stream.cliff_time = stream.cliff_time.saturating_add(pending_duration);
+            stream.end_time = stream.end_time.saturating_add(pending_duration);
+            stream.lock_until = if stream.lock_until > 0 {
+                stream.lock_until.saturating_add(pending_duration)
+            } else {
+                0
+            };
+            stream.last_withdraw_time = now;
+            stream.status = StreamStatus::Active;
+            save_stream(&env, &stream);
+            increment_active_stream_count(&env);
+            increment_token_stream_count(&env, &stream.token);
+            events::stream_activated(&env, stream_id, &caller, now);
+            return Ok(());
+        }
+
+        save_stream(&env, &stream);
         Ok(())
     }
 
@@ -3876,6 +3952,7 @@ impl SoroStreamContract {
                     cliff_seconds: 0,
                     lock_until: stream.lock_until.saturating_sub(stream.start_time),
                     renew_count: stream.options.renew_count,
+                    recurrence: stream.options.renew_count,
                     allow_recipient_termination: stream.options.allow_recipient_termination,
                     non_transferable: stream.options.non_transferable,
                     holdback_amount: 0,
@@ -4176,6 +4253,8 @@ impl SoroStreamContract {
                 non_transferable: false,
                 requires_recipient_approval: false,
                 approval_timestamp: 0,
+                escrow_sender_approved: false,
+                escrow_recipient_approved: false,
                 sender_locked: false,
                 redirect_to_stream_id: None,
                 is_dual_stream: false,
@@ -5204,6 +5283,8 @@ impl SoroStreamContract {
                     non_transferable,
                     requires_recipient_approval: false,
                     approval_timestamp: 0,
+                    escrow_sender_approved: false,
+                    escrow_recipient_approved: false,
                     sender_locked: false,
                     is_dual_stream: false,
                     redirect_to_stream_id: None,
