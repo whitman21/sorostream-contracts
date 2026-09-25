@@ -102,13 +102,11 @@ fn test_metadata_is_stored_and_updatable() {
 
     let stream_id = c.create_stream(&t.sender, &t.recipient, &t.token_id, &100_000, &1000, &0, &0u64, &false, &0u64, &false, &0i128, &None::<u32>, &None::<i128>, &None::<u32>);
     c.update_metadata(&t.sender, &stream_id, &metadata);
-    let stream = c.get_stream(&stream_id);
-    assert_eq!(stream.options.metadata, metadata);
+    assert_eq!(c.get_metadata(&stream_id), Some(metadata.clone()));
 
     let updated = Bytes::from_array(&t.env, &[9u8, 9u8, 9u8]);
     c.update_metadata(&t.sender, &stream_id, &updated);
-    let updated_stream = c.get_stream(&stream_id);
-    assert_eq!(updated_stream.options.metadata, updated);
+    assert_eq!(c.get_metadata(&stream_id), Some(updated));
 }
 
 #[test]

@@ -12,6 +12,8 @@ pub enum StreamError {
     ZeroAmount = 5,
     InvalidDuration = 6,
     InvalidCliff = 8,
+    /// The temporary stream metadata blob exceeds 256 bytes.
+    MetadataTooLong = 30,
     AlreadyInitialized = 9,
     NotInitialized = 10,
     DuplicateStream = 11,

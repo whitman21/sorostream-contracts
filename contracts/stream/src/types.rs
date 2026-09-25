@@ -115,6 +115,9 @@ pub struct StreamOptions {
     /// When true, milestones unlock automatically at their unlock_time (no sender approval needed).
     /// When false, milestones require sender approval via release_milestone().
     pub milestone_release_mode: bool,
+    /// Address authorized to approve milestones for approval-gated streams.
+    /// `None` means the stream uses timestamp gates or sender approvals.
+    pub milestone_approver: Option<Address>,
     /// Reentrancy guard: true if currently processing a withdrawal to prevent re-entrance.
     pub locked: bool,
 
@@ -275,6 +278,20 @@ pub struct Stream {
     /// Extended configuration and runtime state. Nested so `Stream` stays within
     /// Soroban's XDR field-count limit for `#[contracttype]` structs.
     pub options: StreamOptions,
+}
+
+/// A persisted lifecycle status transition for a stream.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamTransition {
+    /// Status before the transition. For creation, this equals `to_status`.
+    pub from_status: StreamStatus,
+    /// Status after the transition.
+    pub to_status: StreamStatus,
+    /// Whether this entry identifies stream creation rather than a status change.
+    pub is_creation: bool,
+    /// Ledger timestamp when the transition was persisted.
+    pub timestamp: u64,
 }
 
 /// Creation-time options for `create_stream`.

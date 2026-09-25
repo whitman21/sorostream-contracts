@@ -7,7 +7,7 @@ use crate::types::StreamStatus;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, Symbol,
+    Address, Bytes, BytesN, Env, Symbol,
 };
 
 struct IntegrationEnv {
@@ -73,6 +73,119 @@ fn params(cliff_seconds: u64, nonce: u64, auto_renew_count: Option<u32>, lock_un
 /// Helper: build the simplest possible CreateStreamParams (no cliff, nonce=n, no extras).
 fn simple_params(nonce: u64) -> CreateStreamParams {
     params(0, nonce, None, 0, false)
+}
+
+#[test]
+fn stream_transition_history_retains_last_ten_entries() {
+    let ie = setup_integration();
+    let c = client(&ie);
+    ie.env.ledger().set_timestamp(0);
+    mint(&ie, &ie.sender, &1_000_000);
+
+    let stream_id = c
+        .create_stream(
+            &ie.sender,
+            &ie.recipient,
+            &ie.token,
+            &1_000,
+            &100,
+            &false,
+            &0,
+            &simple_params(1),
+        )
+        .unwrap();
+
+    for cycle in 0..5u64 {
+        let pause_time = 1 + cycle * 2;
+        ie.env.ledger().set_timestamp(pause_time);
+        c.pause_stream(&ie.sender, &stream_id).unwrap();
+        ie.env.ledger().set_timestamp(pause_time + 1);
+        c.resume_stream(&ie.sender, &stream_id).unwrap();
+    }
+
+    let history = c.get_stream_transitions(&stream_id).unwrap();
+    assert_eq!(history.len(), 10);
+    assert!(!history.get(0).unwrap().is_creation);
+    assert_eq!(history.get(0).unwrap().from_status, crate::StreamStatus::Paused);
+    assert_eq!(history.get(0).unwrap().to_status, crate::StreamStatus::Active);
+    assert_eq!(history.get(9).unwrap().from_status, crate::StreamStatus::Paused);
+    assert_eq!(history.get(9).unwrap().to_status, crate::StreamStatus::Active);
+}
+
+#[test]
+fn approval_milestone_stream_unlocks_one_tranche_per_approval() {
+    let ie = setup_integration();
+    let c = client(&ie);
+    let approver = Address::generate(&ie.env);
+    ie.env.ledger().set_timestamp(0);
+    mint(&ie, &ie.sender, &1_000);
+
+    let mut milestones = soroban_sdk::Vec::new(&ie.env);
+    milestones.push_back((400i128, BytesN::from_array(&ie.env, &[1u8; 32])));
+    milestones.push_back((600i128, BytesN::from_array(&ie.env, &[2u8; 32])));
+
+    let stream_id = c
+        .create_stream_with_approval_milestones(
+            &ie.sender,
+            &ie.recipient,
+            &ie.token,
+            &1_000,
+            &milestones,
+            &7,
+            &0,
+            &false,
+            &approver,
+        )
+        .unwrap();
+
+    ie.env.ledger().set_timestamp(100);
+    assert_eq!(c.get_claimable(&stream_id).unwrap(), 0);
+    assert_eq!(c.withdraw(&stream_id, &ie.recipient), Err(crate::StreamError::ZeroAmount));
+    assert_eq!(
+        c.approve_milestone(&stream_id, &0, &ie.sender),
+        Err(crate::StreamError::NotAuthorized)
+    );
+
+    c.approve_milestone(&stream_id, &0, &approver).unwrap();
+    assert_eq!(c.get_claimable(&stream_id).unwrap(), 400);
+    c.withdraw(&stream_id, &ie.recipient).unwrap();
+
+    c.approve_milestone(&stream_id, &1, &approver).unwrap();
+    assert_eq!(c.get_claimable(&stream_id).unwrap(), 600);
+    c.withdraw(&stream_id, &ie.recipient).unwrap();
+    assert_eq!(balance(&ie, &ie.recipient), 1_000);
+}
+
+#[test]
+fn stream_metadata_uses_temporary_storage_and_enforces_256_byte_limit() {
+    let ie = setup_integration();
+    let c = client(&ie);
+    ie.env.ledger().set_timestamp(0);
+    mint(&ie, &ie.sender, &1_000);
+
+    let stream_id = c
+        .create_stream(
+            &ie.sender,
+            &ie.recipient,
+            &ie.token,
+            &1_000,
+            &100,
+            &false,
+            &0,
+            &simple_params(8),
+        )
+        .unwrap();
+
+    let metadata = Bytes::from_slice(&ie.env, b"payroll-2026-09-invoice-42");
+    c.update_metadata(&ie.sender, &stream_id, &metadata).unwrap();
+    assert_eq!(c.get_metadata(&stream_id), Some(metadata.clone()));
+
+    let oversized = Bytes::from_slice(&ie.env, &[0u8; 257]);
+    assert_eq!(
+        c.update_metadata(&ie.sender, &stream_id, &oversized),
+        Err(crate::StreamError::MetadataTooLong)
+    );
+    assert_eq!(c.get_metadata(&stream_id), Some(metadata));
 }
 
 // ── Full lifecycle: mint → create → withdraw → verify balances ──────────────
@@ -633,6 +746,16 @@ fn integration_query_streams_by_sender_recipient() {
         .collect();
     assert!(active_ids.contains(&s2));
     assert!(active_ids.contains(&s3));
+
+    let indexed_ids = c.get_active_stream_ids_by_sender(&ie.sender);
+    assert_eq!(indexed_ids.len(), 2);
+    assert!(indexed_ids.contains(&s2));
+    assert!(indexed_ids.contains(&s3));
+
+    let cancelled = c.batch_cancel_streams(&ie.sender).unwrap();
+    assert_eq!(cancelled.len(), 2);
+    assert!(cancelled.iter().all(|result| result.is_ok()));
+    assert!(c.get_active_stream_ids_by_sender(&ie.sender).is_empty());
 }
 
 // ── Stats integration ───────────────────────────────────────────────────────
