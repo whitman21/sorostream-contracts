@@ -53,12 +53,14 @@ fn default_params() -> crate::types::CreateStreamParams {
         cliff_seconds: 0,
         nonce: 0,
         renew_count: None,
+        recurrence: None,
         lock_until: 0,
         allow_recipient_termination: false,
         non_transferable: false,
         holdback_amount: 0,
         withdrawal_steps: None,
         min_withdrawal_amount: None,
+        sponsor: None,
         requires_recipient_approval: false,
     }
 }

@@ -617,7 +617,7 @@ Timestamps are **Unix seconds** as returned by `env.ledger().timestamp()`.
 
 ### 40. `TokenWhitelistToggled`
 
-**Trigger:** Admin calls `toggle_whitelist` to enable or disable token whitelist enforcement globally.
+**Trigger:** Admin enables token whitelist enforcement globally. Enforcement cannot be disabled because token calls are an external trust boundary.
 
 > This event has **one topic**.
 

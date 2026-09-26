@@ -589,7 +589,7 @@ This file must be updated whenever a new `StreamError` variant is added to `cont
 
 > **Note:** Code `37` is shared by three variants in the current enum definition due to a known duplicate-discriminant issue. All three are returned as code `37` at the ABI level.
 
-**`TokenNotWhitelisted`** — The token used in `create_stream` is not on the token whitelist when enforcement is enabled.
+**`TokenNotWhitelisted`** — The token used in `create_stream` is not on the mandatory token whitelist.
 - *Trigger:* Token whitelist is active and the provided token address is not approved.
 - *Remediation:* Use an approved token. Query the whitelist or request the admin to add the token.
 

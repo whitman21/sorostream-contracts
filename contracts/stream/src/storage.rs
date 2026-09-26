@@ -130,94 +130,32 @@ pub fn remove_stream(env: &Env, stream_id: u64) {
     env.storage().persistent().remove(&stream_id);
 }
 
-// --- Temporary stream metadata ---
-
-const STREAM_METADATA_TTL_LEDGERS: u32 = 17_280;
-
-fn stream_metadata_key(env: &Env, stream_id: u64) -> (Symbol, u64) {
-    (Symbol::new(env, "md"), stream_id)
+/// Key for the monotonic event sequence number associated with a stream.
+pub fn stream_event_nonce_key(env: &Env, stream_id: u64) -> (Symbol, u64) {
+    (Symbol::new(env, "evn"), stream_id)
 }
 
-/// Returns the temporary metadata blob attached to a stream.
-pub fn get_stream_metadata(env: &Env, stream_id: u64) -> Option<Bytes> {
-    env.storage().temporary().get(&stream_metadata_key(env, stream_id))
-}
-
-/// Stores stream metadata outside the persistent stream record.
-pub fn set_stream_metadata(env: &Env, stream_id: u64, metadata: &Bytes) {
-    let key = stream_metadata_key(env, stream_id);
-    env.storage().temporary().set(&key, metadata);
-    env.storage()
-        .temporary()
-        .extend_ttl(&key, 1, STREAM_METADATA_TTL_LEDGERS);
-}
-
-// --- Stream transition history (circular buffer, capacity = 10) ---
-
-const TRANSITION_HEAD_KEY: &str = "st_head";
-const TRANSITION_LEN_KEY: &str = "st_len";
-const TRANSITION_CAP: u32 = 10;
-
-fn transition_head_key(env: &Env, stream_id: u64) -> (Symbol, u64) {
-    (Symbol::new(env, TRANSITION_HEAD_KEY), stream_id)
-}
-
-fn transition_len_key(env: &Env, stream_id: u64) -> (Symbol, u64) {
-    (Symbol::new(env, TRANSITION_LEN_KEY), stream_id)
-}
-
-fn transition_slot_key(env: &Env, stream_id: u64, idx: u32) -> (Symbol, u64, u32) {
-    (Symbol::new(env, "st"), stream_id, idx)
-}
-
-/// Appends a lifecycle transition to the stream's bounded history.
-pub fn append_stream_transition(env: &Env, stream_id: u64, transition: &StreamTransition) {
-    let head: u32 = env
-        .storage()
-        .persistent()
-        .get(&transition_head_key(env, stream_id))
-        .unwrap_or(0u32);
-    let len: u32 = env
-        .storage()
-        .persistent()
-        .get(&transition_len_key(env, stream_id))
-        .unwrap_or(0u32);
-
+/// Reads the last emitted event nonce for a stream. Starts at 0 before any
+/// stream events are published for this ID.
+pub fn read_stream_event_nonce(env: &Env, stream_id: u64) -> u64 {
     env.storage()
         .persistent()
-        .set(&transition_slot_key(env, stream_id, head % TRANSITION_CAP), transition);
-    env.storage()
-        .persistent()
-        .set(&transition_head_key(env, stream_id), &((head + 1) % TRANSITION_CAP));
-    env.storage()
-        .persistent()
-        .set(&transition_len_key(env, stream_id), &(len + 1).min(TRANSITION_CAP));
+        .get(&stream_event_nonce_key(env, stream_id))
+        .unwrap_or(0u64)
 }
 
-/// Returns the stream's retained transitions in chronological order.
-pub fn read_stream_transitions(env: &Env, stream_id: u64) -> Vec<StreamTransition> {
-    let head: u32 = env
-        .storage()
-        .persistent()
-        .get(&transition_head_key(env, stream_id))
-        .unwrap_or(0u32);
-    let len: u32 = env
-        .storage()
-        .persistent()
-        .get(&transition_len_key(env, stream_id))
-        .unwrap_or(0u32);
-    let mut result = Vec::new(env);
-    for i in 0..len {
-        let idx = (head + TRANSITION_CAP - len + i) % TRANSITION_CAP;
-        if let Some(transition) = env
-            .storage()
-            .persistent()
-            .get::<(Symbol, u64, u32), StreamTransition>(&transition_slot_key(env, stream_id, idx))
-        {
-            result.push_back(transition);
-        }
-    }
-    result
+/// Increments the event nonce for a stream and returns the new value.
+///
+/// The first event for a stream gets nonce 1, which makes off-chain replay
+/// protection deterministic and unambiguous even when multiple withdrawals share
+/// the same `StreamWithdrawn` topic and stream_id.
+pub fn next_stream_event_nonce(env: &Env, stream_id: u64) -> u64 {
+    let key = stream_event_nonce_key(env, stream_id);
+    let next = read_stream_event_nonce(env, stream_id)
+        .checked_add(1)
+        .expect("stream event nonce overflow");
+    env.storage().persistent().set(&key, &next);
+    next
 }
 
 // --- Counter helpers (persistent, O(1) per write) ---
@@ -612,19 +550,35 @@ pub fn write_min_duration(env: &Env, duration: u64) {
         .set(&Symbol::new(env, MIN_DURATION_KEY), &duration);
 }
 
-/// Gets the maximum stream duration in seconds (0 = unlimited/no cap).
+/// Gets the maximum stream duration in seconds.
+///
+/// A value of 0 is treated as the protocol hard cap instead of “unlimited,” so
+/// stream end times cannot be effectively unbounded.
 pub fn read_max_duration(env: &Env) -> u64 {
-    env.storage()
+    let configured = env.storage()
         .instance()
         .get(&Symbol::new(env, MAX_DURATION_KEY))
-        .unwrap_or(0u64)
+        .unwrap_or(crate::MAX_STREAM_DURATION_SECONDS);
+    if configured == 0 {
+        crate::MAX_STREAM_DURATION_SECONDS
+    } else {
+        configured.min(crate::MAX_STREAM_DURATION_SECONDS)
+    }
 }
 
-/// Sets the maximum stream duration in seconds (0 = unlimited/no cap).
+/// Sets the maximum stream duration in seconds.
+///
+/// `0` and any value above the protocol hard cap are clamped back to the hard
+/// cap so a stream cannot live beyond the protocol's safe lifetime.
 pub fn write_max_duration(env: &Env, duration: u64) {
+    let capped = if duration == 0 || duration > crate::MAX_STREAM_DURATION_SECONDS {
+        crate::MAX_STREAM_DURATION_SECONDS
+    } else {
+        duration
+    };
     env.storage()
         .instance()
-        .set(&Symbol::new(env, MAX_DURATION_KEY), &duration);
+        .set(&Symbol::new(env, MAX_DURATION_KEY), &capped);
 }
 
 /// Gets the maximum allowed future start-time offset in seconds.

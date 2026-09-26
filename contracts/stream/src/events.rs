@@ -1,8 +1,12 @@
 #![allow(dead_code)]
 use soroban_sdk::{Address, Bytes, Env, String, Symbol};
 
-/// Event schema version for compatibility tracking
-const EVENT_SCHEMA_VERSION: u32 = 1;
+/// Event schema version for compatibility tracking.
+///
+/// v2 adds the per-stream event nonce appended to stream-scoped events so
+/// off-chain indexers can distinguish a legitimate second event from a replayed
+/// earlier payload for the same stream_id.
+const EVENT_SCHEMA_VERSION: u32 = 2;
 
 /// Returns the current event schema version for off-chain compatibility checking
 pub fn get_event_schema_version() -> u32 {
@@ -21,6 +25,7 @@ pub fn stream_created(
     non_transferable: bool,
     comment: &Option<String>,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamCreated"), stream_id),
         (
@@ -32,6 +37,7 @@ pub fn stream_created(
             end_time,
             non_transferable,
             comment.clone(),
+            nonce,
         ),
     );
 }
@@ -49,9 +55,10 @@ pub fn stream_withdrawn(
     timestamp: u64,
     total_withdrawn: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamWithdrawn"), stream_id),
-        (EVENT_SCHEMA_VERSION, recipient.clone(), amount, timestamp, total_withdrawn),
+        (EVENT_SCHEMA_VERSION, recipient.clone(), amount, timestamp, total_withdrawn, nonce),
     );
 }
 
@@ -63,9 +70,10 @@ pub fn stream_cancelled(
     refund_amount: i128,
     recipient_amount: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamCancelled"), stream_id),
-        (EVENT_SCHEMA_VERSION, sender.clone(), refund_amount, recipient_amount),
+        (EVENT_SCHEMA_VERSION, sender.clone(), refund_amount, recipient_amount, nonce),
     );
 }
 
@@ -80,39 +88,44 @@ pub fn cancellation_fee_collected(
     fee_amount: i128,
     fee_bps: u32,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "CancelFeeCollected"), stream_id),
-        (sender.clone(), fee_amount, fee_bps),
+        (sender.clone(), fee_amount, fee_bps, nonce),
     );
 }
 
 /// Emitted when a sender tops up an existing stream.
 pub fn stream_topped_up(env: &Env, stream_id: u64, added_amount: i128, new_end_time: u64) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamToppedUp"), stream_id),
-        (added_amount, new_end_time),
+        (added_amount, new_end_time, nonce),
     );
 }
 
 /// Emitted when a stream naturally reaches its end time.
 pub fn stream_completed(env: &Env, stream_id: u64) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events()
-        .publish((Symbol::new(env, "StreamCompleted"), stream_id), ());
+        .publish((Symbol::new(env, "StreamCompleted"), stream_id), ((), nonce));
 }
 
 /// Emitted when an auto-renew re-lock fails because the sender has insufficient balance.
 pub fn auto_renew_failed(env: &Env, stream_id: u64, sender: &Address, required: i128) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "AutoRenewFailed"), stream_id),
-        (sender.clone(), required),
+        (sender.clone(), required, nonce),
     );
 }
 
 /// Emitted when a stream's renewal count limit is reached and the stream can no longer auto-renew.
 pub fn renewal_limit_reached(env: &Env, stream_id: u64, sender: &Address, renewals_used: u32) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "RenewalLimitReached"), stream_id),
-        (sender.clone(), renewals_used),
+        (sender.clone(), renewals_used, nonce),
     );
 }
 
@@ -133,9 +146,10 @@ pub fn stream_partial_cancelled(
     refund_amount: i128,
     new_deposit: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, old_stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamPartialCancelled"), old_stream_id),
-        (new_stream_id, sender.clone(), refund_amount, new_deposit),
+        (new_stream_id, sender.clone(), refund_amount, new_deposit, nonce),
     );
 }
 
@@ -157,17 +171,19 @@ pub fn contract_resumed(env: &Env, admin: &Address, timestamp: u64) {
 
 /// Emitted when a stream is paused by the sender.
 pub fn stream_paused(env: &Env, stream_id: u64, sender: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamPaused"), stream_id),
-        sender.clone(),
+        (sender.clone(), nonce),
     );
 }
 
 /// Emitted when a stream is resumed by the sender.
 pub fn stream_resumed(env: &Env, stream_id: u64, sender: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamResumed"), stream_id),
-        sender.clone(),
+        (sender.clone(), nonce),
     );
 }
 
@@ -178,9 +194,10 @@ pub fn fee_collected(
     amount: i128,
     treasury: &Address,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "FeeCollected"), stream_id),
-        (amount, treasury.clone()),
+        (amount, treasury.clone(), nonce),
     );
 }
 
@@ -208,9 +225,10 @@ pub fn stream_terminated_by_recipient(
     recipient_amount: i128,
     refund_amount: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamTerminatedByRecipient"), stream_id),
-        (recipient.clone(), recipient_amount, refund_amount),
+        (recipient.clone(), recipient_amount, refund_amount, nonce),
     );
 }
 
@@ -221,9 +239,23 @@ pub fn recipient_transferred(
     old_recipient: &Address,
     new_recipient: &Address,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "RecipientTransferred"), stream_id),
-        (old_recipient.clone(), new_recipient.clone()),
+        (old_recipient.clone(), new_recipient.clone(), nonce),
+    );
+}
+
+/// Emitted when a stream sender transfers ownership to a new sender.
+pub fn sender_transferred(
+    env: &Env,
+    stream_id: u64,
+    old_sender: &Address,
+    new_sender: &Address,
+) {
+    env.events().publish(
+        (Symbol::new(env, "SenderTransferred"), stream_id),
+        (old_sender.clone(), new_sender.clone()),
     );
 }
 
@@ -251,22 +283,25 @@ pub fn stream_archived(
     recipient: &Address,
     total_amount: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamArchived"), stream_id),
-        (sender.clone(), recipient.clone(), total_amount),
+        (sender.clone(), recipient.clone(), total_amount, nonce),
     );
 }
 
 /// Emitted when metadata is updated for a stream.
 pub fn metadata_updated(env: &Env, stream_id: u64, metadata: &Bytes) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "MetadataUpdated"), stream_id),
-        metadata.clone(),
+        (metadata.clone(), nonce),
     );
 }
 
 /// Emitted when a stream's metadata URI is updated.
 pub fn metadata_uri_updated(env: &Env, stream_id: u64, metadata_uri: &Option<String>) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     let uri_str = if let Some(uri) = metadata_uri {
         uri.clone()
     } else {
@@ -274,23 +309,25 @@ pub fn metadata_uri_updated(env: &Env, stream_id: u64, metadata_uri: &Option<Str
     };
     env.events().publish(
         (Symbol::new(env, "MetadataUriUpdated"), stream_id),
-        uri_str,
+        (uri_str, nonce),
     );
 }
 
 /// Emitted when an expired stream is swept from storage.
 pub fn stream_swept(env: &Env, stream_id: u64, caller: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamSwept"), stream_id),
-        caller.clone(),
+        (caller.clone(), nonce),
     );
 }
 
 /// Emitted when a milestone is released by the sender.
 pub fn milestone_released(env: &Env, stream_id: u64, milestone_index: u32) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "MilestoneReleased"), stream_id),
-        milestone_index,
+        (milestone_index, nonce),
     );
 }
 
@@ -304,18 +341,20 @@ pub fn milestone_approved(env: &Env, stream_id: u64, milestone_index: u32, appro
 
 /// Emitted when an auto-renewal is cancelled for a stream.
 pub fn auto_renew_cancelled(env: &Env, stream_id: u64) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "AutoRenewCancelled"), stream_id),
-        (),
+        ((), nonce),
     );
 }
 
 /// Emitted when a stream is renewed.
 #[allow(dead_code)]
 pub fn stream_renewed(env: &Env, old_stream_id: u64, new_stream_id: u64) {
+    let nonce = crate::storage::next_stream_event_nonce(env, old_stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamRenewed"), old_stream_id),
-        new_stream_id,
+        (new_stream_id, nonce),
     );
 }
 
@@ -345,9 +384,10 @@ pub fn stream_placed_in_escrow(
     recipient: &Address,
     amount: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamPlacedInEscrow"), stream_id),
-        (sender.clone(), recipient.clone(), amount),
+        (sender.clone(), recipient.clone(), amount, nonce),
     );
 }
 
@@ -358,26 +398,44 @@ pub fn stream_placed_in_escrow(
 /// - `sender`: The sender who activated it
 /// - `activation_timestamp`: Ledger timestamp of activation
 pub fn stream_activated(env: &Env, stream_id: u64, sender: &Address, activation_timestamp: u64) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamActivated"), stream_id),
-        (sender.clone(), activation_timestamp),
+        (sender.clone(), activation_timestamp, nonce),
     );
 }
 
 /// Emitted when accumulated protocol fees are swept from the contract to a destination.
 /// Emitted when the sender releases the holdback escrow to the recipient.
 pub fn holdback_released(env: &Env, stream_id: u64, amount: i128, recipient: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "HoldbackReleased"), stream_id),
-        (amount, recipient.clone()),
+        (amount, recipient.clone(), nonce),
     );
 }
 
 /// Emitted when the sender claws back the holdback escrow before the recipient claims it.
 pub fn holdback_clawed_back(env: &Env, stream_id: u64, amount: i128, sender: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "HoldbackClawedBack"), stream_id),
-        (amount, sender.clone()),
+        (amount, sender.clone(), nonce),
+    );
+}
+
+/// Emitted when the token issuer claws back the outstanding escrow from a stream.
+pub fn stream_clawed_back(
+    env: &Env,
+    stream_id: u64,
+    sender: &Address,
+    recipient: &Address,
+    amount: i128,
+    issuer: &Address,
+) {
+    env.events().publish(
+        (Symbol::new(env, "StreamClawedBack"), stream_id),
+        (sender.clone(), recipient.clone(), amount, issuer.clone()),
     );
 }
 
@@ -387,9 +445,10 @@ pub fn holdback_clawed_back(env: &Env, stream_id: u64, amount: i128, sender: &Ad
 
 /// Emitted when a step-vesting stream is created with a tranche schedule.
 pub fn tranche_stream_created(env: &Env, stream_id: u64, sender: &Address, tranche_count: u32, total_amount: i128) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "TrancheStreamCreated"), stream_id),
-        (sender.clone(), tranche_count, total_amount),
+        (sender.clone(), tranche_count, total_amount, nonce),
     );
 }
 
@@ -401,9 +460,10 @@ pub fn tranches_withdrawn(
     tranches_claimed: u32,
     amount: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "TranchesWithdrawn"), stream_id),
-        (recipient.clone(), tranches_claimed, amount),
+        (recipient.clone(), tranches_claimed, amount, nonce),
     );
 }
 
@@ -415,9 +475,10 @@ pub fn tranche_stream_cancelled(
     unclaimed_tranche_refund: i128,
     recipient_amount: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "TrancheStreamCancelled"), stream_id),
-        (sender.clone(), unclaimed_tranche_refund, recipient_amount),
+        (sender.clone(), unclaimed_tranche_refund, recipient_amount, nonce),
     );
 }
 
@@ -433,41 +494,46 @@ pub fn price_check_passed(
     price: i128,
     deviation_bps: u32,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "PriceCheckPassed"), stream_id),
-        (token.clone(), price, deviation_bps),
+        (token.clone(), price, deviation_bps, nonce),
     );
 }
 
 /// Emitted when a stream transitions to the Expired state via mark_expired.
 pub fn stream_expired(env: &Env, stream_id: u64) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamExpired"), stream_id),
-        (),
+        ((), nonce),
     );
 }
 
 /// Emitted when a stream's TTL is bumped to extend its ledger lifetime.
 pub fn ttl_bumped(env: &Env, stream_id: u64, new_expiry_ledger: u32) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "TtlBumped"), stream_id),
-        new_expiry_ledger,
+        (new_expiry_ledger, nonce),
     );
 }
 
 /// Emitted when a delegate is set for a stream.
 pub fn delegate_set(env: &Env, stream_id: u64, sender: &Address, delegate: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "DelegateSet"), stream_id),
-        (sender.clone(), delegate.clone()),
+        (sender.clone(), delegate.clone(), nonce),
     );
 }
 
 /// Emitted when a delegate is revoked from a stream.
 pub fn delegate_revoked(env: &Env, stream_id: u64, sender: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "DelegateRevoked"), stream_id),
-        sender.clone(),
+        (sender.clone(), nonce),
     );
 }
 /// Emitted when fees are swept from the contract.
@@ -480,17 +546,19 @@ pub fn fee_swept(env: &Env, token: &Address, amount: i128, destination: &Address
 
 /// Emitted when slippage threshold is exceeded.
 pub fn slippage_exceeded(env: &Env, stream_id: u64, current_price: i128, max_slippage_bps: u32) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "SlippageExceeded"), stream_id),
-        (current_price, max_slippage_bps),
+        (current_price, max_slippage_bps, nonce),
     );
 }
 
 /// Emitted when slippage is within 80% of the limit (warning).
 pub fn slippage_warning(env: &Env, stream_id: u64, current_deviation_bps: u32, max_slippage_bps: u32) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "SlippageWarning"), stream_id),
-        (current_deviation_bps, max_slippage_bps),
+        (current_deviation_bps, max_slippage_bps, nonce),
     );
 }
 
@@ -560,9 +628,10 @@ pub fn recipient_allowlist_toggled(env: &Env, enabled: bool) {
 
 /// Emitted when a stream is created with allowlist enforcement enabled.
 pub fn stream_created_with_allowlist_enforcement(env: &Env, stream_id: u64, recipient: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamCreatedWithAllowlistEnforcement"), stream_id),
-        recipient.clone(),
+        (recipient.clone(), nonce),
     );
 }
 
@@ -598,9 +667,10 @@ pub fn stream_config(
     withdrawal_steps: Option<u32>,
     min_withdrawal_amount: Option<i128>,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamConfig"), stream_id),
-        (withdrawal_steps, min_withdrawal_amount),
+        (withdrawal_steps, min_withdrawal_amount, nonce),
     );
 }
 
@@ -616,9 +686,10 @@ pub fn withdrawal_step_completed(
     amount: i128,
     recipient: &Address,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "WithdrawalStepCompleted"), stream_id),
-        (step_index, total_steps, amount, recipient.clone()),
+        (step_index, total_steps, amount, recipient.clone(), nonce),
     );
 }
 
@@ -646,9 +717,10 @@ pub fn stream_expiry_warning(
     remaining_balance: i128,
     ledgers_until_expiry: u32,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamExpiryWarning"), stream_id),
-        (sender.clone(), recipient.clone(), remaining_balance, ledgers_until_expiry),
+        (sender.clone(), recipient.clone(), remaining_balance, ledgers_until_expiry, nonce),
     );
 }
 
@@ -693,9 +765,10 @@ pub fn stream_redirect_set(
     target_stream_id: u64,
     recipient: &Address,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamRedirectSet"), stream_id),
-        (target_stream_id, recipient.clone()),
+        (target_stream_id, recipient.clone(), nonce),
     );
 }
 
@@ -709,9 +782,10 @@ pub fn stream_redirect_cleared(
     stream_id: u64,
     recipient: &Address,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamRedirectCleared"), stream_id),
-        recipient.clone(),
+        (recipient.clone(), nonce),
     );
 }
 
@@ -729,9 +803,10 @@ pub fn stream_redirected(
     amount: i128,
     recipient: &Address,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, source_stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamRedirected"), source_stream_id),
-        (target_stream_id, amount, recipient.clone()),
+        (target_stream_id, amount, recipient.clone(), nonce),
     );
 }
 
@@ -785,6 +860,7 @@ pub fn dual_stream_created(
     amount2: i128,
     end_time: u64,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "DualStreamCreated"), stream_id),
         (
@@ -795,6 +871,7 @@ pub fn dual_stream_created(
             token2.clone(),
             amount2,
             end_time,
+            nonce,
         ),
     );
 }
@@ -815,9 +892,10 @@ pub fn dual_stream_withdrawn(
     amount2: i128,
     timestamp: u64,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "DualStreamWithdrawn"), stream_id),
-        (recipient.clone(), amount1, amount2, timestamp),
+        (recipient.clone(), amount1, amount2, timestamp, nonce),
     );
 }
 
@@ -847,9 +925,10 @@ pub fn address_unblocked(env: &Env, admin: &Address, addr: &Address) {
 
 /// Emitted when a sender recovers expired stream funds after the grace period.
 pub fn stream_recovered(env: &Env, stream_id: u64, sender: &Address, amount: i128) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamRecovered"), stream_id),
-        (sender.clone(), amount),
+        (sender.clone(), amount, nonce),
     );
 }
 
@@ -871,6 +950,7 @@ pub fn dual_stream_cancelled(
     refund_amount2: i128,
     recipient_amount2: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "DualStreamCancelled"), stream_id),
         (
@@ -879,6 +959,7 @@ pub fn dual_stream_cancelled(
             recipient_amount1,
             refund_amount2,
             recipient_amount2,
+            nonce,
         ),
     );
 }
@@ -895,9 +976,10 @@ pub fn dual_stream_cancelled(
 /// - `approval_timestamp`: Ledger timestamp at which approval was recorded;
 ///   tokens begin accruing from this point
 pub fn stream_approved(env: &Env, stream_id: u64, recipient: &Address, approval_timestamp: u64) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamApproved"), stream_id),
-        (recipient.clone(), approval_timestamp),
+        (recipient.clone(), approval_timestamp, nonce),
     );
 }
 
@@ -917,9 +999,10 @@ pub fn inheritance_triggered(
     inherit_recipient: &Address,
     amount: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, original_stream_id);
     env.events().publish(
         (Symbol::new(env, "InheritanceTriggered"), original_stream_id),
-        (new_stream_id, inherit_recipient.clone(), amount),
+        (new_stream_id, inherit_recipient.clone(), amount, nonce),
     );
 }
 
@@ -947,9 +1030,10 @@ pub fn fee_exemption_removed(env: &Env, admin: &Address, addr: &Address) {
 /// - `stream_id`: The locked stream
 /// - `sender`: The sender who initiated the lock
 pub fn stream_sender_locked(env: &Env, stream_id: u64, sender: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamSenderLocked"), stream_id),
-        sender.clone(),
+        (sender.clone(), nonce),
     );
 }
 
@@ -970,9 +1054,10 @@ pub fn stream_rate_updated(
     new_end_time: u64,
     remaining_deposit: i128,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "StreamRateUpdated"), stream_id),
-        (old_rate, new_rate, new_end_time, remaining_deposit),
+        (old_rate, new_rate, new_end_time, remaining_deposit, nonce),
     );
 }
 
@@ -1007,6 +1092,7 @@ pub fn split_stream_created(
     token: &Address,
     duration_seconds: u64,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, split_stream_id);
     env.events().publish(
         (Symbol::new(env, "SplitStreamCreated"), split_stream_id),
         (
@@ -1017,6 +1103,7 @@ pub fn split_stream_created(
             weights_bps.clone(),
             token.clone(),
             duration_seconds,
+            nonce,
         ),
     );
 }
@@ -1040,9 +1127,10 @@ pub fn dormant_stream_cancelled(
     refund_amount: i128,
     last_withdraw_time: u64,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "DormantStreamCancelled"), stream_id),
-        (sender.clone(), refund_amount, last_withdraw_time),
+        (sender.clone(), refund_amount, last_withdraw_time, nonce),
     );
 }
 
@@ -1062,9 +1150,10 @@ pub fn on_complete_invoked(
     on_complete_contract: &Address,
     on_complete_function: &Symbol,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "OnCompleteInvoked"), stream_id),
-        (on_complete_contract.clone(), on_complete_function.clone()),
+        (on_complete_contract.clone(), on_complete_function.clone(), nonce),
     );
 }
 
@@ -1074,9 +1163,10 @@ pub fn on_complete_invoked(
 /// - `stream_id`: The stream that completed
 /// - `on_complete_contract`: The contract address that was invoked
 pub fn on_complete_success(env: &Env, stream_id: u64, on_complete_contract: &Address) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "OnCompleteSuccess"), stream_id),
-        on_complete_contract.clone(),
+        (on_complete_contract.clone(), nonce),
     );
 }
 
@@ -1092,9 +1182,10 @@ pub fn on_complete_failed(
     on_complete_contract: &Address,
     error_message: &String,
 ) {
+    let nonce = crate::storage::next_stream_event_nonce(env, stream_id);
     env.events().publish(
         (Symbol::new(env, "OnCompleteFailed"), stream_id),
-        (on_complete_contract.clone(), error_message.clone()),
+        (on_complete_contract.clone(), error_message.clone(), nonce),
     );
 }
 

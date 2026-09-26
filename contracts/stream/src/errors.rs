@@ -17,6 +17,7 @@ pub enum StreamError {
     AlreadyInitialized = 9,
     NotInitialized = 10,
     DuplicateStream = 11,
+    InvalidStartTime = 12,
     ContractPaused = 14,
     Overflow = 15,
     ZeroFlowRate = 16,
