@@ -23,6 +23,7 @@ struct PETestEnv {
 fn default_options() -> StreamCreateOptions {
     StreamCreateOptions {
         renew_count: None,
+        recurrence: None,
         allow_recipient_termination: false,
         non_transferable: false,
     }
