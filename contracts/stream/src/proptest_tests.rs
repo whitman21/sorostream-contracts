@@ -52,6 +52,7 @@ fn make_params(cliff_seconds: u64, nonce: u64, lock_until: u64, allow_recipient_
         holdback_amount: 0,
         withdrawal_steps: None,
         min_withdrawal_amount: None,
+        sponsor: None,
         requires_recipient_approval: false,
     }
 }

@@ -248,8 +248,11 @@ pub struct StreamOptions {
 pub struct Stream {
     /// Unique stream identifier.
     pub id: u64,
-    /// Address of the stream creator / payer.
+    /// Address that controls the stream lifecycle (cancel/pause/lock rights).
     pub sender: Address,
+    /// Optional address that funded the initial stream deposit.
+    /// When `Some`, the sponsor receives any sender-initiated refund of unstreamed funds.
+    pub sponsor: Option<Address>,
     /// Address of the stream beneficiary.
     pub recipient: Address,
     /// SAC-compatible token contract address (e.g. USDC).
@@ -565,6 +568,8 @@ pub struct CreateStreamParams {
     pub withdrawal_steps: Option<u32>,
     /// Optional minimum claimable amount required before a withdrawal is accepted.
     pub min_withdrawal_amount: Option<i128>,
+    /// Optional address that funds the initial deposit. If omitted, the sender pays.
+    pub sponsor: Option<Address>,
     /// Whether this stream requires explicit recipient approval before tokens accrue.
     pub requires_recipient_approval: bool,
 }

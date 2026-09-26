@@ -59,6 +59,7 @@ fn default_params() -> crate::types::CreateStreamParams {
         holdback_amount: 0,
         withdrawal_steps: None,
         min_withdrawal_amount: None,
+        sponsor: None,
         requires_recipient_approval: false,
     }
 }

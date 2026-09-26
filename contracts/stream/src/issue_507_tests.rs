@@ -59,6 +59,7 @@ fn default_params() -> crate::types::CreateStreamParams {
         holdback_amount: 0,
         withdrawal_steps: None,
         min_withdrawal_amount: None,
+        sponsor: None,
         requires_recipient_approval: false,
     }
 }
@@ -158,6 +159,7 @@ fn test_issue_507_completed_streams_reduce_storage_footprint() {
                 holdback_amount: 0,
                 withdrawal_steps: None,
                 min_withdrawal_amount: None,
+                sponsor: None,
                 requires_recipient_approval: false,
             },
         );

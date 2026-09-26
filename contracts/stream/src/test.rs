@@ -2260,9 +2260,10 @@ fn error_batch_cancel_not_sender() {
     let stream_id2 = c.create_stream(&other_sender, &t.recipient, &t.token_id, &100_000, &1000, &0, &0u64, &false, &0u64,
         &false, &0i128, &None::<u32>, &None::<i128>, &None::<u32>);
 
-    let result = c.batch_cancel_stream(&soroban_vec![&t.env, stream_id1, stream_id2], &t.sender);
-    assert_eq!(result.get(0).unwrap(), Ok(()));
-    assert_eq!(result.get(1).unwrap(), Err(StreamError::NotSender));
+    let result = c.try_batch_cancel_stream(&soroban_vec![&t.env, stream_id1, stream_id2], &t.sender);
+    assert_eq!(result, Err(Ok(StreamError::NotSender)));
+    assert!(c.try_get_stream(&stream_id1).is_ok());
+    assert!(c.try_get_stream(&stream_id2).is_ok());
 }
 
 #[test]

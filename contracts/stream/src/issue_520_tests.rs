@@ -1,7 +1,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, IssuerFlags, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env,
 };
@@ -20,9 +20,9 @@ fn setup() -> TestEnv {
 
     let contract_id = env.register(SoroStreamContract, ());
     let token_admin = Address::generate(&env);
-    let token_id = env
-        .register_stellar_asset_contract_v2(token_admin.clone())
-        .address();
+    let token = env.register_stellar_asset_contract_v2(token_admin.clone());
+    token.issuer().set_flag(IssuerFlags::ClawbackEnabledFlag);
+    let token_id = token.address();
 
     let sender = Address::generate(&env);
     let recipient = Address::generate(&env);
@@ -78,6 +78,7 @@ fn test_issue_520_cliff_prevents_early_withdrawal() {
             holdback_amount: 0,
             withdrawal_steps: None,
             min_withdrawal_amount: None,
+            sponsor: None,
             requires_recipient_approval: false,
         },
     );
@@ -123,6 +124,7 @@ fn test_issue_520_cliff_zero_claimable_before_cliff_time() {
             holdback_amount: 0,
             withdrawal_steps: None,
             min_withdrawal_amount: None,
+            sponsor: None,
             requires_recipient_approval: false,
         },
     );
@@ -160,6 +162,7 @@ fn test_issue_520_cliff_exact_boundary() {
             holdback_amount: 0,
             withdrawal_steps: None,
             min_withdrawal_amount: None,
+            sponsor: None,
             requires_recipient_approval: false,
         },
     );

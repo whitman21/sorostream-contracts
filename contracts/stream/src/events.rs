@@ -416,6 +416,21 @@ pub fn holdback_clawed_back(env: &Env, stream_id: u64, amount: i128, sender: &Ad
     );
 }
 
+/// Emitted when the token issuer claws back the outstanding escrow from a stream.
+pub fn stream_clawed_back(
+    env: &Env,
+    stream_id: u64,
+    sender: &Address,
+    recipient: &Address,
+    amount: i128,
+    issuer: &Address,
+) {
+    env.events().publish(
+        (Symbol::new(env, "StreamClawedBack"), stream_id),
+        (sender.clone(), recipient.clone(), amount, issuer.clone()),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Step-vesting tranche events
 // ---------------------------------------------------------------------------

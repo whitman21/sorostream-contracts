@@ -102,6 +102,7 @@ pub trait SoroStreamInterface {
 
     fn release_holdback(env: Env, stream_id: u64, caller: Address) -> Result<(), StreamError>;
     fn claw_back_holdback(env: Env, stream_id: u64, caller: Address) -> Result<(), StreamError>;
+    fn clawback_stream(env: Env, stream_id: u64, issuer: Address) -> Result<(), StreamError>;
 
     fn set_withdrawal_cooldown(env: Env, admin: Address, cooldown_seconds: u64) -> Result<(), StreamError>;
     fn set_whitelist_enabled(env: Env, admin: Address, enabled: bool) -> Result<(), StreamError>;

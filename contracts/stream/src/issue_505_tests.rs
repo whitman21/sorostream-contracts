@@ -75,6 +75,7 @@ fn test_issue_505_storage_optimized_boolean_fields() {
             holdback_amount: 0,
             withdrawal_steps: None,
             min_withdrawal_amount: None,
+            sponsor: None,
             requires_recipient_approval: false,
         },
     );
@@ -113,6 +114,7 @@ fn test_issue_505_storage_optimized_type_conversions() {
             holdback_amount: 0,
             withdrawal_steps: None,
             min_withdrawal_amount: None,
+            sponsor: None,
             requires_recipient_approval: false,
         },
     );
@@ -147,6 +149,7 @@ fn test_issue_505_storage_multiple_boolean_combinations() {
             holdback_amount: 0,
             withdrawal_steps: None,
             min_withdrawal_amount: None,
+            sponsor: None,
             requires_recipient_approval: false,
         },
     );
@@ -171,6 +174,7 @@ fn test_issue_505_storage_multiple_boolean_combinations() {
             holdback_amount: 0,
             withdrawal_steps: None,
             min_withdrawal_amount: None,
+            sponsor: None,
             requires_recipient_approval: false,
         },
     );
